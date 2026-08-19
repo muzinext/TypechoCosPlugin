@@ -299,6 +299,5 @@ define('TYPECHO_COS_DEBUG', 1);
 
 本项目基于 GPL-2.0 许可证开源。
 
-- 项目地址：[GitHub](https://github.com/muzinext/TypechoCosPlugin)
+- 项目地址：[https://github.com/muzinext/TypechoCosPlugin](https://github.com/muzinext/TypechoCosPlugin)
 - 腾讯云 COS 文档：[https://cloud.tencent.com/document/product/436](https://cloud.tencent.com/document/product/436)
-
