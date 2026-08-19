@@ -2,6 +2,13 @@
 
 > 将 Typecho 博客的图片、附件等静态资源存储到腾讯云 COS（Cloud Object Storage），降低本地存储负载，配合 CDN 加速提升访问体验。
 
+[![Typecho](https://img.shields.io/badge/Typecho-1.3.0%2B-blue)](https://typecho.org)
+[![PHP](https://img.shields.io/badge/PHP-8.0%2B-purple)](https://www.php.net)
+[![License](https://img.shields.io/badge/license-GPL--2.0-green)](#许可证)
+[![Version](https://img.shields.io/badge/version-1.0.5-orange)](#更新日志)
+
+---
+
 ## 目录
 
 - [功能特性](#功能特性)
