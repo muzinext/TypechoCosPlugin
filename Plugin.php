@@ -2,7 +2,6 @@
 namespace TypechoPlugin\TypechoCosPlugin;
 
 use Typecho\Plugin\PluginInterface;
-use Typecho\Plugin\Exception as PluginException;
 use Typecho\Config;
 use Typecho\Widget\Helper\Form;
 use Widget\Options;
@@ -13,30 +12,28 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
     exit;
 }
 
-//插件名
-if (!defined('pluginName')) {
-    define('pluginName', 'TypechoCosPlugin');
-}
-
 /**
- * 实现网站静态资源存储到腾讯云COS，有效降低本地存储负载，提升用户体验。
- * @package 腾讯云对象存储（COS）插件
+ * 实现网站静态资源存储到云对象存储，有效降低本地存储负载，提升用户体验。
+ * @package 腾讯云对象存储插件
  * @author 木子小鱼
- * @version 1.0.5
+ * @version 1.1.0
  * @link https://github.com/muzinext/TypechoCosPlugin
  * @dependence 1.3.0-*
  * @date 2026-08-19
  */
 class Plugin implements PluginInterface
 {
+    /** 插件名称（用于配置存储、静态资源路径） */
+    public const NAME = 'TypechoCosPlugin';
+
     /** 上传文件目录（与Typecho核心保持一致，前缀带/） */
     public const UPLOAD_DIR = '/usr/uploads';
 
     /** 插件版本号 */
-    public const PLUGIN_VERSION = '1.0.5';
+    public const PLUGIN_VERSION = '1.1.0';
 
     /** User-Agent 标识 */
-    public const USER_AGENT = 'typecho/1.3.0;tencentcloud-typecho-plugin-cos/1.0.5;cos-php-sdk-v5/2.6.17';
+    public const USER_AGENT = 'typecho/1.3.0;tencentcloud-typecho-plugin-cos/' . self::PLUGIN_VERSION . ';cos-php-sdk-v5/2.6.17';
 
     /** getOptions() 单请求内静态缓存；configHandle 保存后需失效 */
     public static $cachedOptionsInstance = null;
@@ -97,34 +94,20 @@ class Plugin implements PluginInterface
      * 自定义配置修改
      *
      * 保存流程：
-     * 1. 桶校验：使用 region 模式（不依赖自定义 domain）调用 HeadBucket，凭证错误才会失败
+     * 1. 桶校验：使用 region 模式调用 HeadBucket，仅记录警告不阻断保存
      * 2. 持久化：调用 Helper::configPlugin 写入数据库
      *
-     * 注意：Typecho 的 Edit::config 不捕获 PluginException，抛出会导致 500 server error。
-     * 因此此处仅对桶校验失败抛出（凭证错误属严重问题）。
+     * 重要：本方法绝不抛出异常。必填项校验由 Typecho 表单 addRule('required') 负责，
+     * 此处仅做连通性等附加校验，失败时记录日志并继续保存，避免页面跳转异常。
      *
      * @param array $config 配置信息
      * @param bool $is_init 是否初始化
-     * @throws PluginException
      */
     public static function configHandle(array $config, bool $is_init): void
     {
-        // ========== 整个保存流程 Throwable 兜底 ==========
         try {
             if (!$is_init) {
                 $opt = (object)$config;
-
-                // 凭证/地域/桶必填校验
-                $filled = [
-                    'SecretId'       => !empty($opt->secid),
-                    'SecretKey'      => !empty($opt->sekey),
-                    '所属地域'        => !empty($opt->region),
-                    '存储桶名称'      => !empty($opt->bucket),
-                ];
-                $missing = array_keys(array_filter($filled, function ($v) { return !$v; }));
-                if (!empty($missing)) {
-                    throw new PluginException('以下必填项不能为空：' . implode('、', $missing));
-                }
 
                 // 存储桶连通性校验：仅提示，不阻断保存
                 $bucketWarn = null;
@@ -148,24 +131,27 @@ class Plugin implements PluginInterface
                 }
                 if ($bucketWarn !== null) {
                     Action::debugLog('[configHandle] 桶校验警告(不阻断保存): ' . $bucketWarn, true);
+                    self::setWarning($bucketWarn);
+                }
+
+                // 本地路径可写性校验（仅当开启「同步修改本地存储路径」时）
+                if (Action::isEnabled($opt, 'sync_local_path')) {
+                    $localWarn = Action::checkLocalPathWritable((string)($opt->path ?? 'usr/uploads'));
+                    if ($localWarn !== null) {
+                        Action::debugLog('[configHandle] 本地路径警告(不阻断保存): ' . $localWarn, true);
+                        self::setWarning($localWarn);
+                    }
                 }
             }
 
-            Helper::configPlugin(pluginName, $config);
+            Helper::configPlugin(self::NAME, $config);
             // 配置保存后失效同请求内的 options 静态缓存与 CosClient 单例
             self::$cachedOptionsInstance = null;
             self::$cachedCosSingletonClient = null;
             self::$cachedCosSingletonKey = '';
-        } catch (PluginException $e) {
-            Action::debugLog(sprintf(
-                '[configHandle] PluginException: msg=%s, trace=%s',
-                $e->getMessage(),
-                $e->getTraceAsString()
-            ), true);
-            throw $e;
         } catch (\Throwable $e) {
             Action::debugLog(sprintf(
-                '[configHandle] FATAL Throwable: cls=%s, code=%s, msg=%s, file=%s:%d, trace=%s',
+                '[configHandle] FATAL: cls=%s, code=%s, msg=%s, file=%s:%d, trace=%s',
                 get_class($e),
                 $e->getCode(),
                 $e->getMessage(),
@@ -173,11 +159,7 @@ class Plugin implements PluginInterface
                 $e->getLine(),
                 $e->getTraceAsString()
             ), true);
-            throw new PluginException(
-                '保存插件配置时发生未预期错误：' . $e->getMessage() . '（详情请查看服务器 php-fpm.log/error_log，关键词 [TypechoCosPlugin] FATAL）',
-                (int)$e->getCode(),
-                $e
-            );
+            // 绝不抛出异常，避免页面跳转异常。配置保存失败时记录日志即可。
         }
     }
 
@@ -192,11 +174,25 @@ class Plugin implements PluginInterface
             return self::$cachedOptionsInstance;
         }
         try {
-            $opt = Options::alloc()->plugin(pluginName);
+            $opt = Options::alloc()->plugin(self::NAME);
             self::$cachedOptionsInstance = $opt;
             return $opt;
         } catch (\Throwable $e) {
             return null;
+        }
+    }
+
+    /**
+     * 向后端页面推送一条警告提示（保存配置后跳转显示）
+     *
+     * @param string $msg 警告内容
+     */
+    private static function setWarning(string $msg): void
+    {
+        try {
+            \Widget\Notice::alloc()->set($msg, 'warning');
+        } catch (\Throwable $e) {
+            Action::debugLog('[setWarning] failed: ' . $e->getMessage());
         }
     }
 
