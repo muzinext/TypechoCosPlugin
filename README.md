@@ -1,4 +1,4 @@
-# TypechoCosPlugin — 腾讯云 COS 对象存储插件 for Typecho
+# 腾讯云 COS 对象存储插件 for Typecho
 
 > 将 Typecho 博客的图片、附件等静态资源存储到腾讯云 COS（Cloud Object Storage），降低本地存储负载，配合 CDN 加速提升访问体验。支持上传目录自定义、图片自动转 WebP（双引擎）、本地路径同步等实用功能。
 
